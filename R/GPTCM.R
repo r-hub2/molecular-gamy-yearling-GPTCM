@@ -1,318 +1,354 @@
-#' @title Fit Bayesian GPTCM Model
+#' @title Fit Bayesian GPTCM Models
 #'
 #' @description
-#' This is the main function to fit the Bayesian GPTCM model with multiscale data
-#' for sparse identification of high-dimensional covariates.
+#' This is the main function to fit the Bayesian GPTCMs (Zhao et al. 2025) with
+#' multiscale data for sparse identification of high-dimensional covariates
 #'
 #' @name GPTCM
-#' 
-#' @importFrom stats median
-#' @importFrom HI arms
-#' @import remotes 
 #'
-#' @param dat a list containing observed data from \code{n} subjects with
-#' components \code{t}, \code{di}, \code{X}. For graphical learning of the
-#' Markov random field prior, \code{survObj} should be a list of the list with
-#' survival and covariates data. For subgroup models with or without graphical
-#' learning, \code{survObj} should be a list of multiple lists with each
-#' component list representing each subgroup's survival and covariates data
-#' @param n TBA
-#' @param p TBA
-#' @param L TBA
-#' @param hyperpar TBA
-#' @param initial TBA
-#' @param nIter TBA
-#' @param burnin TBA
-#' @param thin TBA
-#' @param tick TBA
+#' @importFrom Rcpp evalCpp
 #'
+#' @param dat input data as a list containing survival data sub-list
+#' \code{survObj} with two vectors (\code{event} and \code{time}), clinical
+#' variable matrix \code{x0}, cluster-specific covariates \code{X}, and
+#' proportions data matrix \code{proportion}
+#' @param nIter the number of iterations of the chain
+#' @param burnin number of iterations to discard at the start of the chain
+#' @param thin thinning MCMC intermediate results to be stored
+#' @param tick an integer used for printing the iteration index and some updated
+#' parameters every tick-th iteration. Default is 1
+#' @param proportion.model logical value; should the proportions be modeled or
+#' not. If (\code{proportion.model = FALSE}), the argument \code{dirichlet} will
+#' be invalid
+#' @param dirichlet logical value; should the proportions be modeled via the
+#' common (\code{dirichlet = TRUE}) or alternative (\code{dirichlet = FALSE})
+#' parametrization of the Dirichlet regression model
+#' @param hyperpar a list of relevant hyperparameters
+#' @param BVS logical value for implementing Bayesian variable selection
+#' @param kappaIGamma logical value for using inverse-gamma prior (\code{TRUE})
+#' or gamma prior (\code{FALSE}) for Weibull's shape parameter
+#' shape parameter
+#' @param kappaSampler one of \code{"arms", "slice"} (slice not yet implemented)
+#' @param gammaPrior one of \code{c("bernoulli", "MRF")}
+#' @param gammaSampler one of \code{c("mc3", "bandit")}
+#' @param etaPrior one of \code{c("bernoulli", "MRF")}
+#' @param etaSampler one of \code{c("mc3", "bandit")}
+#' @param w0IGamma logical value; if \code{FALSE}, a common parameter is used
+#' for the intercept's prior variance and the coefficient's prior variance
+#' @param initial a list of initial values for parameters "kappa", "xi",
+#' "betas", and "zetas"
+#' @param arms.list a list of parameters for the ARMS method
 #'
-#' @return An object of ...
+#' @return An object of a list including the following components:
+#' \itemize{
+#' \item input - a list of all input parameters by the user
+#' \item output - a list of the all mcmc output estimates:
+#' \itemize{
+#' \item "\code{xi}" - a matrix with MCMC intermediate estimates of effects on clinical variables
+#' \item "\code{kappa}" - a vector with MCMC intermediate estimates of the Weibull's shape parameter
+#' \item "\code{betas}" - a matrix with MCMC intermediate estimates of effects on cluster-specific survival
+#' \item "\code{zetas}" - a matrix with MCMC intermediate estimates of effects on cluster-specific proportions
+#' \item "\code{gammas}" - a matrix with MCMC intermediate estimates of inclusion indicators of variables for cluster-specific survival
+#' \item "\code{gamma_acc_rate}" - acceptance rate of the M-H sampling for gammas
+#' \item "\code{etas}" - a matrix with MCMC intermediate estimates of inclusion indicators of variables for cluster-specific proportions
+#' \item "\code{eta_acc_rate}" - acceptance rate of the M-H sampling for etas
+#' \item "\code{loglikelihood}" - a matrix with MCMC intermediate estimates of individuals' likelihoods
+#' \item "\code{tauSq}" - a vector with MCMC intermediate estimates of tauSq
+#' \item "\code{wSq}" - a matrix with MCMC intermediate estimates of wSq
+#' \item "\code{vSq}" - a matrix with MCMC intermediate estimates of vSq
+#' \item "\code{post}" - a list with posterior means of "xi", "kappa", "betas", "zetas", "gammas", "etas"
+#' }
+#' \item call - the matched call
+#' }
 #'
+#' @references Zhao Z, Kızılaslan F, Wang S, Zucknick M (2025). \emph{Generalized promotion time cure model: A new modeling framework to identify cell-type-specific genes and improve survival prognosis}. arXiv:2509.01001
 #'
 #' @examples
 #'
-#' x <- 1
+#' # simulate data
+#' set.seed(123)
+#' n <- 200 # subjects
+#' p <- 10 # variable selection predictors
+#' L <- 3 # cell types
+#' dat <- simData(n, p, L)
+#'
+#' # run a Bayesian GPTCM model: GPTCM-Ber2
+#' fit <- GPTCM(dat, nIter = 10, burnin = 0)
+#'
 #'
 #' @export
-GPTCM <- function(dat, n, p, L,
-                  hyperpar = NULL,
-                  initial = NULL,
-                  nIter = 1,
-                  burnin = 0,
+GPTCM <- function(dat,
+                  nIter = 500,
+                  burnin = 200,
                   thin = 1,
-                  tick = 100) {
+                  tick = 100,
+                  proportion.model = TRUE,
+                  dirichlet = TRUE,
+                  hyperpar = NULL,
+                  BVS = TRUE,
+                  kappaIGamma = TRUE,
+                  kappaSampler = "arms",
+                  gammaPrior = "bernoulli",
+                  gammaSampler = "MC3",
+                  etaPrior = "bernoulli",
+                  etaSampler = "MC3",
+                  w0IGamma = TRUE,
+                  initial = NULL,
+                  arms.list = NULL) {
   # Validation
   stopifnot(burnin < nIter)
+  stopifnot(burnin >= 0)
+
+  n <- dim(dat$X)[1]
+  p <- dim(dat$X)[2]
+  L <- dim(dat$X)[3]
+
+  if (is.null(arms.list)) {
+    arms.list <- list(
+      n = 1, # This should always be n=1 with the current code
+      nsamp = 1,
+      ninit = 10,
+      metropolis = 1,
+      arms.simple = FALSE,
+      convex = 1,
+      npoint = 100
+    )
+    # arms.simple: logical value; should the "adaptive rejection metropolis
+    # sampling" or the "derivative-free adaptive rejection sampling with
+    # metropolis step" (default) is used
+  }
+
+  if (arms.list$n != 1) {
+    stop("Need to modify 'arms_gibbs.cpp' if arms.list$n > 1!")
+  }
 
   # check the formula
   cl <- match.call()
 
+  gammaSampler <- tolower(gammaSampler)
+  if (!gammaSampler %in% c("mc3", "bandit")) {
+    stop('Argument "gammaSampler" must be one of c("mc3", "bandit")!')
+  }
+
+  gammaPrior <- tolower(gammaPrior)
+  if (!gammaPrior %in% c("bernoulli", "mrf")) {
+    stop('Argument "gammaSampler" must be one of c("bernoulli", "MRF")!')
+  }
+
+  etaSampler <- tolower(etaSampler)
+  if (!etaSampler %in% c("mc3", "bandit")) {
+    stop('Argument "etaSampler" must be one of c("mc3", "bandit")!')
+  }
+
+  etaPrior <- tolower(etaPrior)
+  if (!etaPrior %in% c("bernoulli", "mrf")) {
+    stop('Argument "etaSampler" must be one of c("bernoulli", "MRF")!')
+  }
+
   # set hyperparamters of all piors
+  # if (is.null(hyperpar)) {
   if (is.null(hyperpar)) {
-    hyperpar$tauA <- 20
-    hyperpar$tauB <- 50
-    # hyperpar$tauA <- 1.5; hyperpar$tauB <- 50; tauSq <- 1
-    # hyperpar$wA <- 20; hyperpar$wB <- 50; wSq <- 1
+    hyperpar <- list()
+  }
+
+  # MRF prior related hyperparameters
+  if (gammaPrior == "mrf") { # Maybe not use if-condition, otherwise some issues
+    if (is.null(hyperpar$mrfG)) {
+      hyperpar$mrfA <- -3
+      hyperpar$mrfB <- 0 # 0.01
+      hyperpar$mrfG <- matrix(0, nrow = 2, ncol = 3)
+    }
+    hyperpar$mrfG.weights <- hyperpar$mrfG[, 3]
+    hyperpar$mrfG <- hyperpar$mrfG[, 1:2]
+  }
+
+  if (etaPrior == "mrf") {
+    if (is.null(hyperpar$mrfG.prop)) {
+      hyperpar$mrfA.prop <- -3
+      hyperpar$mrfB.prop <- 0 # 0.01
+      hyperpar$mrfG.prop <- matrix(0, nrow = 2, ncol = 3)
+    }
+    hyperpar$mrfG.prop.weights <- hyperpar$mrfG.prop[, 3]
+    hyperpar$mrfG.prop <- hyperpar$mrfG.prop[, 1:2]
+  }
+
+  # spike-and-slab's gammas hyperparameters of beta prior
+  if (!"pi" %in% names(hyperpar)) {
+    hyperpar$pi <- 0
+  }
+  if (!"piA" %in% names(hyperpar)) {
+    hyperpar$piA <- 2
+    hyperpar$piB <- 20
+  }
+
+  # spike-and-slab's etas hyperparameters
+  if (!"rho" %in% names(hyperpar)) {
+    hyperpar$rho <- 0
+  }
+  if (!"rhoA" %in% names(hyperpar)) {
+    hyperpar$rhoA <- 2
+    hyperpar$rhoB <- 20
+  }
+
+  # hyperpar$tauA <- 20; hyperpar$tauB <- 50
+  if (!"tauA" %in% names(hyperpar)) {
+    hyperpar$tauA <- 5
+    hyperpar$tauB <- 20
+  }
+  if (!"tau0A" %in% names(hyperpar)) {
+    hyperpar$tau0A <- hyperpar$tauA
+    hyperpar$tau0B <- hyperpar$tauB
+  }
+  # hist(1/rgamma(100, 20, 50))
+  # hyperpar$wA <- 20; hyperpar$wB <- 50; wSq <- 1
+  if (!"wA" %in% names(hyperpar)) {
     hyperpar$wA <- 5
     hyperpar$wB <- 20
-    hyperpar$vA <- 10
+  }
+  if (!"vA" %in% names(hyperpar)) {
+    hyperpar$vA <- 5 # 10
     hyperpar$vB <- 20
-    # hyperpar$kappaA <- 3; hyperpar$kappaB <- 1 # This is for Gamma prior
-    # hyperpar$kappaA <- 3; hyperpar$kappaB <- 10#5#10 # This is for Inverse-Gamma prior
-    hyperpar$kappaA <- 5
-    hyperpar$kappaB <- 20
+  }
+  if (kappaIGamma) {
+    if (!"kappaA" %in% names(hyperpar)) {
+      hyperpar$kappaA <- 5
+      hyperpar$kappaB <- 20 # 5
+    }
+  } else {
+    if (!"kappaA" %in% names(hyperpar)) {
+      hyperpar$kappaA <- 1 # 3
+      hyperpar$kappaB <- 1 # This is for Gamma prior
+    }
+  }
+  hyperpar$kappaIGamma <- kappaIGamma
+
+  if (w0IGamma) {
+    hyperpar$w0A <- hyperpar$wA
+    hyperpar$w0B <- hyperpar$wB
+  }
+  hyperpar$w0IGamma <- w0IGamma
+
+  hyperpar$Delta <- 20
+  # }
+  hyperpar$tauSq <- rep(1, L)
+  hyperpar$tau0Sq <- 1
+  hyperpar$wSq <- rep(1, L)
+  hyperpar$w0Sq <- 1
+  # hyperpar$vSq <- c(10, 1, 1)
+  hyperpar$vSq <- 1
+
+  if (!"v0Sq" %in% names(hyperpar)) {
+    hyperpar$v0Sq <- 10
+  }
+  hyperpar$v0A <- hyperpar$vA
+  hyperpar$v0B <- hyperpar$vB
+
+  # transform proportions data if including values very close to 0 or 1
+  # This is the same as in DirichletReg::DR_data
+  if (any(dat$proportion < 1e-10) || any(dat$proportion > 1 - 1e-10)) {
+    dat$proportion <- (dat$proportion * (n - 1) + 1 / L) / n
   }
 
   # initialization of parameters
   if (is.null(initial)) {
-    tauSq <- 1
-    wSq <- 1
-    vSq <- c(10, 1, 1)
-    kappas <- 0.9
+    initList <- list()
 
-    betas.current <- matrix(0, nrow = dim(dat$XX)[2], ncol = NCOL(dat$proportion))
-    mu.current <- matrix(0, nrow = dim(dat$XX)[1], ncol = NCOL(dat$proportion))
-    for (l in 1:L) {
-      mu.current[, l] <- exp(dat$beta0[l] + dat$XX[, , l] %*% betas.current[, l])
-    }
-    lambdas <- mu.current / gamma(1 + 1 / kappas) # lambdas is a parameter in WEI3 distr.
+    initList$xi <- rep(0, NCOL(dat$x0))
+
+    initList$kappa <- 0.9
+    initList$betas <- matrix(0, nrow = dim(dat$X)[2] + 1, ncol = NCOL(dat$proportion)) # include intercept
+    initList$gammas <- matrix(as.numeric(initList$betas[-1, ] != 0),
+      nrow = dim(dat$X)[2], ncol = NCOL(dat$proportion)
+    )
 
     ## proportion Dirichlet part
-    phi <- 1
-    zetas.current <- matrix(0, nrow = dim(dat$XX)[2] + 1, ncol = NCOL(dat$proportion) - 1) # include intercept
-    proportion <- matrix(0, nrow = dim(dat$XX)[1], ncol = NCOL(dat$proportion))
-    for (l in 1:(L - 1)) { # using the last cell type as reference
-      proportion[, l] <- exp(cbind(1, dat$XX[, , l]) %*% zetas.current[, l]) /
-        (1 + rowSums(sapply(1:(L - 1), function(xx) {
-          exp(cbind(1, dat$XX[, , xx]) %*% zetas.current[, xx])
-        })))
-    }
-    proportion[, L] <- 1 - rowSums(proportion[, -L])
-
-    betas <- mu.current / gamma(1 + 1 / kappas)
-    weibull.S <- matrix(nrow = n, ncol = 3)
-    for (l in 1:L) {
-      weibull.S[, l] <- exp(-(dat$survObj$time / betas[, l])^kappas)
-    }
-
-    xi <- c(0, 0, 0)
-    thetas <- exp(dat$x0 %*% xi)
+    initList$phi <- 1
+    initList$zetas <- matrix(0, nrow = dim(dat$X)[2] + 1, ncol = NCOL(dat$proportion)) # include intercept
   }
 
-  ## define output variables
-  xi.mcmc <- matrix(0, nrow = 1 + nIter, ncol = NCOL(dat$x0))
-  xi.mcmc[1, ] <- xi
-  kappas.mcmc <- c(kappas, rep(0, nIter))
-  phi.mcmc <- c(phi, rep(0, nIter))
-  tauSq.mcmc <- c(tauSq, rep(0, nIter))
-  # tauSq.mcmc <- matrix(0, nrow = 1+nIter, ncol = 3)
-  wSq.mcmc <- c(wSq, rep(0, nIter))
-  vSq.mcmc <- matrix(0, nrow = 1 + nIter, ncol = 2)
-  betas.mcmc <- matrix(0, nrow = 1 + nIter, ncol = NCOL(dat$proportion) * dim(dat$XX)[2])
-  betas.mcmc[1, ] <- as.vector(betas.current)
-  zetas.mcmc <- matrix(0, nrow = 1 + nIter, ncol = (NCOL(dat$proportion) - 1) * (dim(dat$XX)[2] + 1))
-  zetas.mcmc[1, ] <- as.vector(zetas.current)
-
-  globalvariable <- list(
-    dat = dat,
-    proportion = proportion,
-    kappas = kappas, 
-    kappaA = hyperpar$kappaA, kappaB = hyperpar$kappaB,
-    lambdas = lambdas,
-    weibull.S = weibull.S,
-    betas.current = betas.current,
-    mu.current = mu.current,
-    #thetas = thetas,
-    #xi = xi,
-    zetas.current = zetas.current,
-    #phi = phi,
-    vSq = vSq,
-    wSq = wSq,
-    tauSq = tauSq,
-    L = L
+  if (!"bound.pos" %in% names(hyperpar)) {
+    hyperpar$bound.neg <- -10
+    hyperpar$bound.pos <- 10
+  }
+  hyperpar$bound.kappa <- 1e-2
+  rangeList <- list(
+    xiMin = hyperpar$bound.neg, xiMax = hyperpar$bound.pos,
+    zetaMin = hyperpar$bound.neg, zetaMax = hyperpar$bound.pos,
+    betaMin = hyperpar$bound.neg, betaMax = hyperpar$bound.pos,
+    kappaMin = hyperpar$bound.kappa, kappaMax = hyperpar$bound.pos
   )
-  list2env(globalvariable, .GlobalEnv)
-  
-  ## MCMC iterations
-  for (m in 1:nIter) {
-    if (m %% tick == 0) {
-      cat("MCMC iteration:", m, "\n")
-    }
-    
-    #new.env()
-    
-    ## update \xi's in cure fraction
-    xi.mcmc.internal <- HI::arms(
-      y.start = xi,
-      myldens = logpost_xi2,
-      indFunc = convex_support,
-      n.sample = 5
-    )
-    ## n.sample = 20 will result in less variation
-    xi <- colMeans(xi.mcmc.internal) # [-c(1:(nrow(xi.mcmc.internal)/2)),])
-    xi <- sapply(xi, function(xx) {
-      min(abs(xx), 3 - 0.1) * sign(xx)
-    })
-    # xi <- xi.mcmc.internal
-    xi.mcmc[1 + m, ] <- xi
-    globalvariable <- list( xi = xi )
-    list2env(globalvariable, .GlobalEnv)
 
-    vSq[-1] <- sampleV(2, hyperpar$vA, hyperpar$vB, xi)
-    vSq.mcmc[1 + m, ] <- vSq[-1]
-    globalvariable <- list( vSq = vSq )
-    list2env(globalvariable, .GlobalEnv)
 
-    thetas <- exp(dat$x0 %*% xi)
-    globalvariable <- list( thetas = thetas )
-    list2env(globalvariable, .GlobalEnv)
-
-    ## update phi in Dirichlet measurement error model
-    phi.mcmc.internal <- HI::arms(
-      y.start = phi,
-      myldens = logpost_phi,
-      indFunc = convex_support_phi,
-      n.sample = 10
-    )
-    ## n.sample = 20 will result in less variation
-    # phi <- mean(phi.mcmc.internal)#[-c(1:(length(phi.mcmc.internal)/2))])#median
-    phi <- median(phi.mcmc.internal[-c(1:(length(phi.mcmc.internal) / 2))]) # median
-    phi <- median(c(phi, 0.1, 200 - 0.1))
-    phi.mcmc[1 + m] <- phi
-    globalvariable <- list( phi = phi )
-    list2env(globalvariable, .GlobalEnv)
-
-    ## update \zeta_l of p_l in non-cure fraction; the last cell type as reference
-    for (l in 1:(L - 1)) {
-      for (j in 1:(p + 1)) {
-        if (j == 1) wSq <- 10
-        # globalVariables(c("l", "j")) ## This is not safe
-        globalvariableJL <- list( j = j, l = l )
-        list2env(globalvariableJL, .GlobalEnv)
-        
-        zetas.mcmc.internal <- HI::arms(
-          y.start = zetas.current[j, l],
-          myldens = logpost_zeta_jl,
-          indFunc = convex_support,
-          n.sample = 20
-        )
-        ## n.sample = 20 will result in less variation
-        # zeta.l.new <- mean(zetas.mcmc.internal)#[-c(1:(length(zetas.mcmc.internal)/2))]) #median
-        zeta.l.new <- median(zetas.mcmc.internal[-c(1:(length(zetas.mcmc.internal) / 2))]) # median
-        # zeta.l.new <- zetas.mcmc.internal
-        zetas.current[j, l] <- min(abs(zeta.l.new), 3 - 0.1) * sign(zeta.l.new)
-        # wSq <- sampleW(1, hyperpar$wA, hyperpar$wB, zetas.current[j,l])
-        globalvariable <- list( zetas.current = zetas.current )
-        list2env(globalvariable, .GlobalEnv)
-      }
-      for (ll in 1:(L - 1)) { # the l-th subtype proportion is updated, and the all composition should be updated
-        proportion[, ll] <- exp(cbind(1, dat$XX[, , ll]) %*% zetas.current[, ll]) /
-          (1 + rowSums(sapply(1:(L - 1), function(xx) {
-            exp(cbind(1, dat$XX[, , xx]) %*% zetas.current[, xx])
-          })))
-      }
-      proportion[, L] <- 1 - rowSums(proportion[, -L])
-      globalvariable <- list( proportion = proportion )
-      list2env(globalvariable, .GlobalEnv)
-    }
-    zetas.mcmc[1 + m, ] <- as.vector(zetas.current)
-
-    ## update wSq, the variance of zetas
-    wSq <- sampleW(1, hyperpar$wA, hyperpar$wB, zetas.current[-1, ])
-    wSq.mcmc[1 + m] <- wSq
-    globalvariable <- list( wSq = wSq )
-    list2env(globalvariable, .GlobalEnv)
-
-    ## update kappa in noncure fraction
-    kappas.mcmc.internal <- HI::arms(
-      y.start = kappas,
-      myldens = logpost_kappas,
-      indFunc = convex_support_kappas,
-      n.sample = 20
-    )
-    ## n.sample = 20 will result in less variation
-    # kappas <- mean(kappas.mcmc.internal)#[-c(1:(length(kappas.mcmc.internal)/2))])#median
-    kappas <- median(kappas.mcmc.internal[-c(1:(length(kappas.mcmc.internal) / 2))])
-    # kappas <- kappas.mcmc.internal
-    kappas.mcmc[1 + m] <- median(c(kappas, 0.1 + 0.1, 10 - 0.1))
-    globalvariable <- list( kappas = kappas )
-    list2env(globalvariable, .GlobalEnv)
-
-    ## update \beta_l of S_l(t) in non-cure fraction
-    for (l in 1:L) {
-      for (j in 1:p) {
-        # globalVariables(c("l", "j")) ## This is not safe
-        globalvariableJL <- list( j = j, l = l )
-        list2env(globalvariableJL, .GlobalEnv)
-        
-        betas.mcmc.internal <- HI::arms(
-          y.start = betas.current[j, l],
-          myldens = logpost_beta_jl,
-          indFunc = convex_support,
-          # y.start = betas.current[, l],
-          # myldens = logpost_beta_l,
-          n.sample = 20
-        )
-        ## n.sample = 20 will result in less variation
-        # beta.l.new <- mean(betas.mcmc.internal)#[-c(1:(length(betas.mcmc.internal)/2))]) #median
-        beta.l.new <- median(betas.mcmc.internal[-c(1:(length(betas.mcmc.internal) / 2))]) # median
-        # beta.l.new <- betas.mcmc.internal
-        betas.current[j, l] <- min(abs(beta.l.new), 3 - 0.1) * sign(beta.l.new)
-        # beta.l.new <- colMeans(betas.mcmc.internal[-c(1:(nrow(betas.mcmc.internal)/2)),])
-        # betas.current[,l] <- sapply(beta.l.new, function(xx){min(abs(xx), 5-0.1) * sign(xx)} )
-        # tauSq <- sampleTau(1, hyperpar$tauA, hyperpar$tauB, betas.current[j, l])
-        globalvariable <- list( betas.current = betas.current )
-        list2env(globalvariable, .GlobalEnv)
-      }
-      mu.current[, l] <- exp(dat$XX[, , l] %*% betas.current[, l])
-      lambdas[, l] <- mu.current[, l] / gamma(1 + 1 / kappas) # lambdas is a parameter in WEI3 distr.
-      weibull.S[, l] <- exp(-(dat$survObj$time / lambdas[, l])^kappas)
-      # tauSq[l] <- sampleTau(1, hyperpar$tauA, hyperpar$tauB, betas.current[, l])
-      globalvariable <- list( mu.current = mu.current,
-                              weibull.S = weibull.S)
-      list2env(globalvariable, .GlobalEnv)
-    }
-    betas.mcmc[1 + m, ] <- as.vector(betas.current)
-    globalvariable <- list( lambdas = lambdas )
-    list2env(globalvariable, .GlobalEnv)
-
-    ## update tauSq, the variance of betas
-    # tauSq <- sampleTau(3, hyperpar$tauA, hyperpar$tauB, betas.current)
-    # tauSq.mcmc[1+m, ] <- tauSq
-    tauSq <- sampleTau(1, hyperpar$tauA, hyperpar$tauB, betas.current)
-    tauSq.mcmc[1 + m] <- tauSq
-    globalvariable <- list( tauSq = tauSq)
-    list2env(globalvariable, .GlobalEnv)
-  }
-  cat("... Done!\n")
+  #################
+  ## Output objects
+  #################
 
   ret <- list(input = list(), output = list(), call = cl)
   class(ret) <- "GPTCM"
 
+  ret$input$n <- n
+  ret$input$p <- p
+  ret$input$L <- L
+  ret$input$BVS <- BVS
+  ret$input$proportion.model <- proportion.model
+  ret$input$dirichlet <- dirichlet
   ret$input$nIter <- nIter
   ret$input$burnin <- burnin
+  ret$input$thin <- thin
   ret$input$hyperpar <- hyperpar
 
-  # survival predictions based on posterior mean
-  ret$output$posterior <- list(
-    xi = colMeans(xi.mcmc[-c(1:(nIter / 2)), ]),
-    kappas = mean(kappas.mcmc[-c(1:(nIter / 2))]),
-    phi = mean(phi.mcmc[-c(1:(nIter / 2))]),
-    betas = matrix(colMeans(betas.mcmc[-c(1:(nrow(betas.mcmc) / 2)), ]), ncol = L),
-    thetas = exp(dat$x0 %*% xi)
+
+  #################
+  ## Main steps for Bayesian inference
+  #################
+
+  ## MCMC iterations
+  ret$output <- run_mcmc(
+    nIter,
+    burnin,
+    thin,
+    arms.list$n, # n: number of samples to draw, now only 1
+    arms.list$nsamp, # nsamp: number of MCMC for generating each ARMS sample, only keeping the last one
+    arms.list$ninit, # ninit: number of initials as meshgrid values for envelop search
+    arms.list$metropolis, # metropolis: 0/1 metropolis step or not
+    arms.list$arms.simple,
+    arms.list$convex, # convex: adjustment for convexity
+    arms.list$npoint, # npoint: maximum number of envelope points
+    dirichlet,
+    proportion.model,
+    BVS,
+    gammaPrior,
+    gammaSampler,
+    etaPrior,
+    etaSampler,
+    initList,
+    rangeList,
+    hyperpar,
+    dat$survObj$event,
+    dat$survObj$time,
+    dat$X,
+    dat$x0,
+    dat$proportion
   )
 
-  ret$output$mcmc <- list(
-    xi = xi.mcmc,
-    kappas = kappas.mcmc,
-    phi = phi.mcmc,
-    betas = betas.mcmc,
-    tauSq = tauSq.mcmc,
-    wSq = wSq.mcmc,
-    zetas = zetas.mcmc,
-    vSq = vSq.mcmc
-  )
+  # survival predictions based on posterior mean
+  # ret$output$posterior <- list(
+  #   xi = colMeans(ret$output$xi[-c(1:burnin), ]),
+  #   kappa = mean(ret$output$kappa[-c(1:burnin)]),
+  #   betas = matrix(colMeans(ret$output$betas[-c(1:burnin), ]), ncol = L)
+  # )
+  # ret$output$posterior <- ret$output$post
+
+  # ret$output$mcmc <- list(
+  #   xi = xi.mcmc,
+  #   kappa = kappa.mcmc,
+  #   phi = phi.mcmc,
+  #   betas = betas.mcmc,
+  #   zetas = zetas.mcmc,
+  #   tauSq = tauSq.mcmc,
+  #   wSq = wSq.mcmc,
+  #   vSq = vSq.mcmc
+  # )
 
   return(ret)
 }

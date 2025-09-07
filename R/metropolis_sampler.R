@@ -1,29 +1,29 @@
 #' @title Metropolis sampler for a target density
 #'
 #' @description
-#' Random number generator via MH algorithm. Adapted from https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings/
+#' Random number generator via Metropolis-Hastings algorithm.
 #'
 #' @name metropolis_sampler
-#' 
+#'
 #' @importFrom stats rweibull runif
 #'
-#' @param initial_value TBA
-#' @param n TBA
-#' @param proposal_shape TBA
-#' @param proposal_scale TBA
-#' @param theta TBA
-#' @param proportion TBA
-#' @param mu TBA
-#' @param kappas TBA
-#' @param burnin TBA
-#' @param lag TBA
+#' @param initial_value initial values
+#' @param n number of draws
+#' @param proposal_shape Weibull's shape parameter in the proposal
+#' @param proposal_scale Weibull's scale parameter in the proposal
+#' @param theta cure rate parameter (log scale)
+#' @param proportion proportions data
+#' @param mu mean survival time
+#' @param kappas Weibull's true shape parameter
+#' @param burnin length of burn-in period
+#' @param lag discarding lag-1 values in the Metropolis step
 #'
-#' @return An object of ...
+#' @return A dataframe consisting of the sampled values and acceptance rate
 #'
 #'
 #' @examples
 #'
-#' x <- 1
+#' times <- metropolis_sampler(10, 5)
 #'
 #' @export
 metropolis_sampler <- function(initial_value,
@@ -63,11 +63,11 @@ metropolis_sampler <- function(initial_value,
   results
 }
 
-
+## internal function for the Metropolis-Hastings algorithm
 metropolis_step <- function(x, proposal_shape, proposal_scale,
                             theta, proportion, mu, kappas) {
   proposed_x <- rweibull(1, shape = proposal_shape, scale = proposal_scale)
-  accept_prob <- min(1, target(proposed_x, theta, proportion, mu, kappas) /
+  accept_prob <- min(1, target(proposed_x, theta, proportion, mu, kappas) / 
                        target(x, theta, proportion, mu, kappas))
   u <- runif(1)
   if (is.na(u <= accept_prob)) {

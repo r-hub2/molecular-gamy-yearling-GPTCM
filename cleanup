@@ -6,3 +6,7 @@ rm -rf config.* *.dir src/Makevars src/Makefile src/config.h confdefs.h \
 
 find . -name \*~ -exec rm {} \;
 find . -name \*.flc -exec rm {} \;
+
+if [ -e "~/.R/Makevars.bak_CustomConfig" ]; then
+  mv -f ~/.R/Makevars.bak_CustomConfig ~/.R/Makevars
+fi

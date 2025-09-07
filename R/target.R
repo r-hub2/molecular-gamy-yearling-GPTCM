@@ -1,30 +1,27 @@
 #' @title Target density
 #'
 #' @description
-#' Predefined target density for S_pop in GTPCM
+#' Predefined target density corresponding to the population survival function
+#' of GPTCM
 #'
 #' @name target
 #'
-#' @param x TBA
-#' @param theta TBA
-#' @param proportion TBA
-#' @param mu TBA
-#' @param kappas TBA
+#' @param x value generated from the proposal distribution
+#' @param theta cure rate parameter (log scale)
+#' @param proportion proportions data
+#' @param mu mean survival time
+#' @param kappas Weibull's true shape parameter
 #'
-#' @return An object of ...
+#' @return value of the targeted (improper) probability density function
 #'
 #'
 #' @examples
 #'
-#' x <- 1
+#' time1 <- target(1.2, 0.1, c(0.2, 0.3, 0.5), c(0.2, 0.1, 0.4), 2)
 #'
 #' @export
 target <- function(x, theta, proportion, mu, kappas) {
-  # survival.function <- exp( -theta * (1 - sum(proportion * exp(-lambdas*x^kappa)))  )
-  # # un-normalized pdf
-  # pdf <- survival.function * theta *
-  #   kappa*x^(kappa-1) *
-  #   sum(proportion * lambdas * exp(-lambdas*x^kappa))
+  ## Weibull 3
   lambdas <- mu / gamma(1 + 1 / kappas)
   survival.function <- exp(-(x / lambdas)^kappas)
   # improper pdf
@@ -34,26 +31,5 @@ target <- function(x, theta, proportion, mu, kappas) {
           (x / lambdas)^(kappas - 1) * 
           exp(-(x / lambdas)^kappas))
 
-  ## exponetial survival
-  # survival.function <- exp( -lambdas * x  )
-  # pdf <- exp(-theta * (1-survival.function)) *
-  #   theta * lambdas * exp(-lambdas*x)
-
-  ## Weibull 1
-  # survival.function <- exp( - (x/lambdas)^kappa  )
-  # pdf <- exp(-theta * (1-survival.function)) *
-  #   theta * kappa / lambdas * (x/lambdas)^(kappa - 1) * exp(-(x/lambdas)^kappa)
-
-  ## Weibull 2
-  # survival.function <- exp( - lambdas*x^kappa  )
-  # pdf <- exp(-theta * (1-survival.function)) *
-  #   theta * lambdas * x^(kappa - 1) * exp(-lambdas*x^kappa)
-
-  ## Weibull 3
-  # betas <- lambdas / gamma(1 + 1/kappa)
-  # survival.function <- exp( -(x/betas)^kappa )
-  # pdf <- exp( -theta * (1 - survival.function) ) *
-  #   theta *
-  #   kappa/betas * (x/betas)^(kappa-1) * exp(-(x/betas)^kappa)
   return(pdf)
 }

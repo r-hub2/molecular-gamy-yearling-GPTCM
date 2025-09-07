@@ -2,56 +2,119 @@
 % Please edit documentation in R/GPTCM.R
 \name{GPTCM}
 \alias{GPTCM}
-\title{Fit Bayesian GPTCM Model}
+\title{Fit Bayesian GPTCM Models}
 \usage{
 GPTCM(
   dat,
-  n,
-  p,
-  L,
-  hyperpar = NULL,
-  initial = NULL,
-  nIter = 1,
-  burnin = 0,
+  nIter = 500,
+  burnin = 200,
   thin = 1,
-  tick = 100
+  tick = 100,
+  proportion.model = TRUE,
+  dirichlet = TRUE,
+  hyperpar = NULL,
+  BVS = TRUE,
+  kappaIGamma = TRUE,
+  kappaSampler = "arms",
+  gammaPrior = "bernoulli",
+  gammaSampler = "MC3",
+  etaPrior = "bernoulli",
+  etaSampler = "MC3",
+  w0IGamma = TRUE,
+  initial = NULL,
+  arms.list = NULL
 )
 }
 \arguments{
-\item{dat}{a list containing observed data from \code{n} subjects with
-components \code{t}, \code{di}, \code{X}. For graphical learning of the
-Markov random field prior, \code{survObj} should be a list of the list with
-survival and covariates data. For subgroup models with or without graphical
-learning, \code{survObj} should be a list of multiple lists with each
-component list representing each subgroup's survival and covariates data}
+\item{dat}{input data as a list containing survival data sub-list
+\code{survObj} with two vectors (\code{event} and \code{time}), clinical
+variable matrix \code{x0}, cluster-specific covariates \code{X}, and
+proportions data matrix \code{proportion}}
 
-\item{n}{TBA}
+\item{nIter}{the number of iterations of the chain}
 
-\item{p}{TBA}
+\item{burnin}{number of iterations to discard at the start of the chain}
 
-\item{L}{TBA}
+\item{thin}{thinning MCMC intermediate results to be stored}
 
-\item{hyperpar}{TBA}
+\item{tick}{an integer used for printing the iteration index and some updated
+parameters every tick-th iteration. Default is 1}
 
-\item{initial}{TBA}
+\item{proportion.model}{logical value; should the proportions be modeled or
+not. If (\code{proportion.model = FALSE}), the argument \code{dirichlet} will
+be invalid}
 
-\item{nIter}{TBA}
+\item{dirichlet}{logical value; should the proportions be modeled via the
+common (\code{dirichlet = TRUE}) or alternative (\code{dirichlet = FALSE})
+parametrization of the Dirichlet regression model}
 
-\item{burnin}{TBA}
+\item{hyperpar}{a list of relevant hyperparameters}
 
-\item{thin}{TBA}
+\item{BVS}{logical value for implementing Bayesian variable selection}
 
-\item{tick}{TBA}
+\item{kappaIGamma}{logical value for using inverse-gamma prior (\code{TRUE})
+or gamma prior (\code{FALSE}) for Weibull's shape parameter
+shape parameter}
+
+\item{kappaSampler}{one of \code{"arms", "slice"} (slice not yet implemented)}
+
+\item{gammaPrior}{one of \code{c("bernoulli", "MRF")}}
+
+\item{gammaSampler}{one of \code{c("mc3", "bandit")}}
+
+\item{etaPrior}{one of \code{c("bernoulli", "MRF")}}
+
+\item{etaSampler}{one of \code{c("mc3", "bandit")}}
+
+\item{w0IGamma}{logical value; if \code{FALSE}, a common parameter is used
+for the intercept's prior variance and the coefficient's prior variance}
+
+\item{initial}{a list of initial values for parameters "kappa", "xi",
+"betas", and "zetas"}
+
+\item{arms.list}{a list of parameters for the ARMS method}
 }
 \value{
-An object of ...
+An object of a list including the following components:
+\itemize{
+\item input - a list of all input parameters by the user
+\item output - a list of the all mcmc output estimates:
+\itemize{
+\item "\code{xi}" - a matrix with MCMC intermediate estimates of effects on clinical variables
+\item "\code{kappa}" - a vector with MCMC intermediate estimates of the Weibull's shape parameter
+\item "\code{betas}" - a matrix with MCMC intermediate estimates of effects on cluster-specific survival
+\item "\code{zetas}" - a matrix with MCMC intermediate estimates of effects on cluster-specific proportions
+\item "\code{gammas}" - a matrix with MCMC intermediate estimates of inclusion indicators of variables for cluster-specific survival
+\item "\code{gamma_acc_rate}" - acceptance rate of the M-H sampling for gammas
+\item "\code{etas}" - a matrix with MCMC intermediate estimates of inclusion indicators of variables for cluster-specific proportions
+\item "\code{eta_acc_rate}" - acceptance rate of the M-H sampling for etas
+\item "\code{loglikelihood}" - a matrix with MCMC intermediate estimates of individuals' likelihoods
+\item "\code{tauSq}" - a vector with MCMC intermediate estimates of tauSq
+\item "\code{wSq}" - a matrix with MCMC intermediate estimates of wSq
+\item "\code{vSq}" - a matrix with MCMC intermediate estimates of vSq
+\item "\code{post}" - a list with posterior means of "xi", "kappa", "betas", "zetas", "gammas", "etas"
+}
+\item call - the matched call
+}
 }
 \description{
-This is the main function to fit the Bayesian GPTCM model with multiscale data
-for sparse identification of high-dimensional covariates.
+This is the main function to fit the Bayesian GPTCMs (Zhao et al. 2025) with
+multiscale data for sparse identification of high-dimensional covariates
 }
 \examples{
 
-x <- 1
+# simulate data
+set.seed(123)
+n <- 200 # subjects
+p <- 10 # variable selection predictors
+L <- 3 # cell types
+dat <- simData(n, p, L)
 
+# run a Bayesian GPTCM model: GPTCM-Ber2
+fit <- GPTCM(dat, nIter = 10, burnin = 0)
+
+
+}
+\references{
+Zhao Z, Kızılaslan F, Wang S, Zucknick M (2025). \emph{Generalized promotion time cure model: A new modeling framework to identify cell-type-specific genes and improve survival prognosis}. arXiv:2509.01001
 }

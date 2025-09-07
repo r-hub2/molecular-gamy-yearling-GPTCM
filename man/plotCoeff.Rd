@@ -2,27 +2,72 @@
 % Please edit documentation in R/plotCoeff.R
 \name{plotCoeff}
 \alias{plotCoeff}
-\title{Plots for estimated coefficients}
+\title{Plot posterior estimates of regression coefficients}
 \usage{
-plotCoeff(dat, datMCMC, estimator = "beta", ...)
+plotCoeff(
+  dat,
+  datMCMC,
+  estimator = "beta",
+  intercept = FALSE,
+  bandwidth = NULL,
+  xlim = NULL,
+  xlab = NULL,
+  label.y = NULL,
+  first.coef = NULL,
+  y.axis.size = 8,
+  ...
+)
 }
 \arguments{
-\item{dat}{TBA}
+\item{dat}{input data as a list containing survival data sub-list
+\code{survObj} with two vectors (\code{event} and \code{time}), clinical
+variable matrix \code{x0}, cluster-specific covariates \code{X}, and
+proportions data matrix \code{proportion}}
 
-\item{datMCMC}{TBA}
+\item{datMCMC}{returned object from the main function \code{GPTCM()}}
 
-\item{estimator}{TBA}
+\item{estimator}{print estimators, one of
+\code{c("beta", "zeta", "gamma", "eta")}}
 
-\item{...}{TBA}
+\item{intercept}{logical value to print intercepts}
+
+\item{bandwidth}{a value of bandwidth used for the ridgeplot}
+
+\item{xlim}{numeric vectors of length 2, giving the x-coordinate range.}
+
+\item{xlab}{a title for the x axis}
+
+\item{label.y}{a title for the y axis}
+
+\item{first.coef}{number of the first variables. Default \code{NULL} for
+all variables}
+
+\item{y.axis.size}{text size in pts}
+
+\item{...}{others}
 }
 \value{
-An object of ...
+A \code{ggplot2::ggplot} object. See \code{?ggplot2::ggplot} for more
+details of the object.
 }
 \description{
 create nice plots for estimated coefficients and 95% credible intervals
 }
 \examples{
 
-x <- 1
+# simulate data
+set.seed(123)
+n <- 200 # subjects
+p <- 10 # variable selection predictors
+L <- 3 # cell types
+dat <- simData(n, p, L)
 
+# run a Bayesian GPTCM model: GPTCM-Ber2
+fit <- GPTCM(dat, nIter = 10, burnin = 0)
+
+plotCoeff(dat, datMCMC = fit, estimator = "beta")
+
+}
+\references{
+Zhao Z, Kızılaslan F, Wang S, Zucknick M (2025). \emph{Generalized promotion time cure model: A new modeling framework to identify cell-type-specific genes and improve survival prognosis}. arXiv:2509.01001
 }
