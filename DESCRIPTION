@@ -20,5 +20,5 @@ Imports: Rcpp, survival, riskRegression, ggplot2, ggridges, miCoPTCM,
 Suggests: knitr
 NeedsCompilation: yes
 SystemRequirements: C++17
-Packaged: 2025-09-08 06:44:02 UTC; zhiz
+Packaged: 2025-09-08 07:00:59 UTC; zhiz
 Author: Zhi Zhao [aut, cre]
