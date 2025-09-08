@@ -17,8 +17,8 @@ RoxygenNote: 7.3.2
 LinkingTo: Rcpp, RcppArmadillo
 Imports: Rcpp, survival, riskRegression, ggplot2, ggridges, miCoPTCM,
         loo, MASS, Matrix, scales, utils, stats, graphics
-Suggests: knitr
+Suggests: knitr, survminer
 NeedsCompilation: yes
 SystemRequirements: C++17
-Packaged: 2025-09-08 07:00:59 UTC; zhiz
+Packaged: 2025-09-08 07:11:47 UTC; zhiz
 Author: Zhi Zhao [aut, cre]
